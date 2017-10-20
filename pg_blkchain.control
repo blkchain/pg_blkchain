@@ -1,0 +1,4 @@
+# Blockchain Extension
+comment = 'Tools to Process the Blockchain'
+default_version = '0.0.1'
+relocatable = true
