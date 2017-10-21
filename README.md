@@ -85,8 +85,11 @@ ORDER BY count(1);
 (6 rows)
 ```
 
-More details to follow. If you find this interesting, comment here in
-an issue or on twitter @humblehack, whatever. Also if you'd like to help.
+More details to follow. This [blog post](https://grisha.org/blog/2017/10/20/blockchain-in-postgresql-part-2/)
+has some more info.
+
+If you find this interesting, comment here in an issue or on twitter
+@humblehack, whatever. Also if you'd like to help.
 
 ## Building ##
 
