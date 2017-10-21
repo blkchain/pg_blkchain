@@ -2,14 +2,10 @@
 #include "fmgr.h"
 #include "utils/builtins.h"
 
-
-//#include "ccoin/ripemd160.h"
-//void ripemd160(const uint8_t* msg, uint32_t msg_len, uint8_t* hash);
-
 #include "ccoin/script.h"
 #include "ccoin/core.h"
 
-/* For SRE */
+/* For SRF */
 #include "access/htup_details.h"
 #include "funcapi.h"
 
@@ -68,36 +64,6 @@ verify_sig(PG_FUNCTION_ARGS)
 
     PG_RETURN_BOOL(result);
 }
-
-// ZZZ
-/* PG_FUNCTION_INFO_V1(eval_script); */
-/* Datum */
-/* eval_script(PG_FUNCTION_ARGS) */
-/* { */
-/*     bytea *bsig    = PG_GETARG_BYTEA_P(0); */
-/*     bytea *bpk     = PG_GETARG_BYTEA_P(1); */
-/*     bytea *btx     = PG_GETARG_BYTEA_P(2); */
-/*     int32 n       = PG_GETARG_INT32(3); */
-
-/*     struct const_buffer txbuf = { VARDATA(btx), VARSIZE(btx)-VARHDRSZ }; */
-/*     cstring c_sig = { VARDATA(bsig), VARSIZE(bsig)-VARHDRSZ }; */
-/*     cstring c_pk  = { VARDATA(bpk), VARSIZE(bpk)-VARHDRSZ }; */
-
-/*     bool result; */
-/*     struct bp_tx tx; */
-
-/*     bp_tx_init(&tx); */
-/*     if (!deser_bp_tx(&tx, &txbuf)) */
-/*         ereport(ERROR, */
-/*                 (errcode(ERRCODE_DATA_EXCEPTION), */
-/*                  errmsg("unable to parse transaction"))); */
-
-/*     // ZZZ where do these stupid flags come from? */
-
-/*     result = bp_script_verify(&c_sig, &c_pk, &tx, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); */
-
-/*     PG_RETURN_BOOL(result); */
-/* } */
 
 PG_FUNCTION_INFO_V1(get_vin);
 Datum
