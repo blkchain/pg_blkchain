@@ -118,6 +118,8 @@ get_vin(PG_FUNCTION_ARGS)
         {
 			/* fast track when no results */
             bp_tx_free(tx);
+            pfree(tx);
+            pfree(ctx);
             MemoryContextSwitchTo(oldcontext);
             SRF_RETURN_DONE(funcctx);
         }
@@ -152,7 +154,7 @@ get_vin(PG_FUNCTION_ARGS)
         /* prevout_hash */
         poh = (bytea *) palloc(sizeof(bu256_t) + VARHDRSZ);
         SET_VARSIZE(poh, sizeof(bu256_t) + VARHDRSZ);
-        memcpy((void *) VARDATA(poh), (void *)&txin->prevout.hash, sizeof(bu256_t));
+        memcpy(VARDATA(poh), &txin->prevout.hash, sizeof(bu256_t));
         values[1] = PointerGetDatum(poh);
 
         /* prevout_n */
@@ -161,7 +163,7 @@ get_vin(PG_FUNCTION_ARGS)
         /* scriptsig */
         sig = (bytea *) palloc(txin->scriptSig->len + VARHDRSZ);
         SET_VARSIZE(sig, txin->scriptSig->len + VARHDRSZ);
-        memcpy((void *) VARDATA(sig), (void *)txin->scriptSig->str, txin->scriptSig->len);
+        memcpy(VARDATA(sig), txin->scriptSig->str, txin->scriptSig->len);
         values[3] = PointerGetDatum(sig);
 
         /* sequence */
@@ -177,6 +179,8 @@ get_vin(PG_FUNCTION_ARGS)
     {
         /* clean up */
         bp_tx_free(ctx->tx);
+        pfree(ctx->tx);
+        pfree(ctx);
 
         SRF_RETURN_DONE(funcctx);
     }
@@ -236,6 +240,8 @@ get_vout(PG_FUNCTION_ARGS)
         {
 			/* fast track when no results */
             bp_tx_free(tx);
+            pfree(tx);
+            pfree(ctx);
             MemoryContextSwitchTo(oldcontext);
             SRF_RETURN_DONE(funcctx);
         }
@@ -271,7 +277,7 @@ get_vout(PG_FUNCTION_ARGS)
         /* scriptpubkey */
         pk = (bytea *) palloc(txout->scriptPubKey->len + VARHDRSZ);
         SET_VARSIZE(pk, txout->scriptPubKey->len + VARHDRSZ);
-        memcpy((void *) VARDATA(pk), (void *)txout->scriptPubKey->str, txout->scriptPubKey->len);
+        memcpy(VARDATA(pk), txout->scriptPubKey->str, txout->scriptPubKey->len);
         values[2] = PointerGetDatum(pk);
 
 		/* Build CTxOut tuple */
@@ -284,9 +290,65 @@ get_vout(PG_FUNCTION_ARGS)
     {
         /* clean up */
         bp_tx_free(ctx->tx);
+        pfree(ctx->tx);
+        pfree(ctx);
 
         SRF_RETURN_DONE(funcctx);
     }
+}
+
+PG_FUNCTION_INFO_V1(get_tx);
+Datum
+get_tx(PG_FUNCTION_ARGS)
+{
+
+    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+
+    Datum		values[3];
+    bool		nulls[3] = {false};
+    TupleDesc   tupdesc;
+    HeapTuple   tuple;
+    Datum       result;
+
+    bytea       *hash;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function returning record called in context "
+                        "that cannot accept type record")));
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+    bp_tx_calc_sha256(tx);
+
+    /* hash */
+    hash = (bytea *) palloc(32 + VARHDRSZ);
+    SET_VARSIZE(hash, 32+VARHDRSZ);
+    memcpy(VARDATA(hash), &tx->sha256, 32);
+    values[0] = PointerGetDatum(hash);
+
+    /* version */
+    values[1] = UInt32GetDatum(tx->nVersion);
+
+    /* locktime */
+    values[2] = UInt32GetDatum(tx->nLockTime);
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(tuple);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_DATUM(result);
 }
 
 PG_FUNCTION_INFO_V1(get_vout_arr);
@@ -347,7 +409,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
         /* scriptpubkey */
         pk = (bytea *) palloc(txout->scriptPubKey->len + VARHDRSZ);
         SET_VARSIZE(pk, txout->scriptPubKey->len + VARHDRSZ);
-        memcpy((void *) VARDATA(pk), (void *)txout->scriptPubKey->str, txout->scriptPubKey->len);
+        memcpy(VARDATA(pk), txout->scriptPubKey->str, txout->scriptPubKey->len);
         values[2] = PointerGetDatum(pk);
 
 		/* Build CTxOut tuple */
@@ -359,6 +421,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
     result = construct_array(elems, tx->vout->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
 
     bp_tx_free(tx);
+    pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
 }
@@ -449,7 +512,7 @@ parse_script(PG_FUNCTION_ARGS)
         {
             data = (bytea *) palloc(op.data.len + VARHDRSZ);
             SET_VARSIZE(data, op.data.len + VARHDRSZ);
-            memcpy((void *) VARDATA(data), (void *)op.data.p, op.data.len);
+            memcpy(VARDATA(data), op.data.p, op.data.len);
             values[2] = PointerGetDatum(data);
         } else
             nulls[2] = true;
@@ -463,8 +526,9 @@ parse_script(PG_FUNCTION_ARGS)
     else
     {
         /* clean up */
-        pfree((void *)ctx->bp->buf);
-        pfree((void *)ctx->bp);
+        pfree(ctx->bp->buf);
+        pfree(ctx->bp);
+        pfree(ctx);
 
         SRF_RETURN_DONE(funcctx);
     }

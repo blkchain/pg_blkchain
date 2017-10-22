@@ -5,7 +5,12 @@ CREATE FUNCTION verify_sig(bytea, bytea, int) RETURNS bool
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE TYPE TxIn AS (n INT, prevout_hash BYTEA, prevout_n INT, scriptsig BYTEA, sequence BIGINT);
+CREATE TYPE Tx AS (hash BYTEA, version BIGINT, locktime BIGINT);
+CREATE FUNCTION get_tx(bytea) RETURNS Tx
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE TxIn AS (n INT, prevout_hash BYTEA, prevout_n INT, scriptsig BYTEA, sequence INT);
 CREATE FUNCTION get_vin(bytea) RETURNS SETOF TxIn
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
