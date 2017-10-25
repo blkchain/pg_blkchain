@@ -94,8 +94,7 @@ get_vin(PG_FUNCTION_ARGS)
         if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
             ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("function returning record called in context "
-                            "that cannot accept type record")));
+                     errmsg("function called in context that cannot accept the return type")));
 
 		ctx = (tcontext *) palloc(sizeof(tcontext));
 		ctx->tupdesc = BlessTupleDesc(tupdesc);
@@ -216,8 +215,7 @@ get_vout(PG_FUNCTION_ARGS)
         if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
             ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("function returning record called in context "
-                            "that cannot accept type record")));
+                     errmsg("function called in context that cannot accept the return type")));
 
 		ctx = (tcontext *) palloc(sizeof(tcontext));
 		ctx->tupdesc = BlessTupleDesc(tupdesc);
@@ -317,8 +315,7 @@ get_tx(PG_FUNCTION_ARGS)
     if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context "
-                        "that cannot accept type record")));
+                 errmsg("function called in context that cannot accept the return type")));
 
     tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
     bp_tx_init(tx);
@@ -351,6 +348,70 @@ get_tx(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(result);
 }
 
+PG_FUNCTION_INFO_V1(get_block);
+Datum
+get_block(PG_FUNCTION_ARGS)
+{
+
+    bytea         *b_blk = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_blk), VARSIZE(b_blk)-VARHDRSZ };
+    struct bp_block  *blk;
+
+    Datum		values[6];
+    bool		nulls[6] = {false};
+    TupleDesc   tupdesc;
+    HeapTuple   tuple;
+    Datum       result;
+
+    bytea       *hashPrev;
+    bytea       *hashMerkle;
+
+    if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function called in context that cannot accept the return type")));
+
+    blk = (struct bp_block *)palloc(sizeof(struct bp_block));
+    bp_block_init(blk);
+
+    if (!deser_bp_block(blk, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse block header")));
+
+    /* version */
+    values[0] = UInt32GetDatum(blk->nVersion);
+
+    /* hashPrevBlock */
+    hashPrev = (bytea *) palloc(32 + VARHDRSZ);
+    SET_VARSIZE(hashPrev, 32+VARHDRSZ);
+    memcpy(VARDATA(hashPrev), &blk->hashPrevBlock, 32);
+    values[1] = PointerGetDatum(hashPrev);
+
+    /* hashMerkleRoot */
+    hashMerkle = (bytea *) palloc(32 + VARHDRSZ);
+    SET_VARSIZE(hashMerkle, 32+VARHDRSZ);
+    memcpy(VARDATA(hashMerkle), &blk->hashMerkleRoot, 32);
+    values[2] = PointerGetDatum(hashMerkle);
+
+    /* time */
+    values[3] = UInt32GetDatum(blk->nTime);
+
+    /* bits */
+    values[4] = UInt32GetDatum(blk->nBits);
+
+    /* nonce */
+    values[5] = UInt32GetDatum(blk->nNonce);
+
+    tuple = heap_form_tuple(tupdesc, values, nulls);
+    result = HeapTupleGetDatum(tuple);
+
+    bp_block_free(blk);
+    pfree(blk);
+
+    PG_RETURN_DATUM(result);
+}
+
 PG_FUNCTION_INFO_V1(get_vout_arr);
 Datum
 get_vout_arr(PG_FUNCTION_ARGS)
@@ -371,8 +432,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
     if (get_call_result_type(fcinfo, &arroid, NULL) != TYPEFUNC_SCALAR)
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function returning record called in context "
-                        "that cannot accept type record")));
+                 errmsg("function called in context that cannot accept the return type")));
 
     /* arroid is an array, we need to get the type of the array element */
     tupoid = get_element_type(arroid);
@@ -454,8 +514,7 @@ parse_script(PG_FUNCTION_ARGS)
         if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
             ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                     errmsg("function returning record called in context "
-                            "that cannot accept type record")));
+                     errmsg("function called in context that cannot accept the return type")));
 
 		ctx = (tcontext *) palloc(sizeof(tcontext));
 		ctx->tupdesc = BlessTupleDesc(tupdesc);
@@ -482,22 +541,18 @@ parse_script(PG_FUNCTION_ARGS)
         Datum       result;
         bytea       *data;
         text        *op_sym;
-        char        *ops = "UNK";
+        const char  *ops;
         int         opsz;
 
         /* op_sym */
-        if (op.op < OP_PUSHDATA4)
+        if (op.op == 0x00)
+            ops = "OP_FALSE";
+        else if (op.op < 0x4c)
             ops = "OP_PUSHDATA";
-        else if (op.op == OP_NOP)
-            ops = "OP_NOP";
-        else if (op.op == OP_EQUALVERIFY)
-            ops = "OP_EQUALVERIFY";
-        else if (op.op == OP_HASH160)
-            ops = "OP_HASH160";
-        else if (op.op == OP_DUP)
-            ops = "OP_DUP";
-        else if (op.op == OP_CHECKSIG)
-            ops = "OP_CHECKSIG";
+        else if (op.op == 0x51)
+            ops = "OP_TRUE";
+        else
+            ops = GetOpName(op.op);
         opsz = strlen(ops);
         op_sym = (text *)palloc(opsz + VARHDRSZ);
         memcpy(VARDATA(op_sym), ops, opsz);

@@ -68,21 +68,24 @@ SELECT parse_script((get_vout(tx)).scriptpubkey) FROM rtxs WHERE id = 37898;
 ```
 
 ```sql
---Note: this is obviously not the full blockchain
+-- Note: this will take a while to run!
 
 SELECT (parse_script((get_vout(tx)).scriptpubkey)).op_sym, count(1)
 FROM rtxs
 GROUP BY op_sym
-ORDER BY count(1);
-  op_sym     |  count
-----------------+---------
- OP_NOP         |       5
- OP_DUP         | 1007586
- OP_EQUALVERIFY | 1007586
- OP_HASH160     | 1007586
- OP_PUSHDATA    | 1139431
- OP_CHECKSIG    | 1151434
-(6 rows)
+ORDER BY count(1) DESC LIMIT 10;
+         op_sym         |   count
+------------------------+-----------
+ OP_PUSHDATA            | 678204416
+ OP_HASH160             | 672704434
+ OP_CHECKSIG            | 598508189
+ OP_EQUALVERIFY         | 597189173
+ OP_DUP                 | 597189166
+ OP_EQUAL               |  75515405
+ OP_RETURN              |   3017195
+ OP_CHECKMULTISIG       |    574881
+ OP_TRUE                |    572552
+ OP_9                   |      2635
 ```
 
 More details to follow. This [blog post](https://grisha.org/blog/2017/10/20/blockchain-in-postgresql-part-2/)

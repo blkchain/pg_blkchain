@@ -1,19 +1,29 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_blkchain" to load this file. \quit
 
+-- uint32 is represented as an INT because both are 4 bytes. INT,
+-- however, is signed, so a value above 4294967295 will be negative.
 
-CREATE TYPE CTx AS (hash BYTEA, version BIGINT, locktime BIGINT);
-CREATE FUNCTION get_tx(bytea) RETURNS CTx
+-- names are generally preserved from the core code but without the
+-- type prefix, i.e. nVersion is version.
+
+CREATE TYPE CBlock AS (version INT, hashPrevBlock BYTEA, hashMerkleRoot BYTEA, time INT, bits INT, nonce INT);
+CREATE FUNCTION get_block(bytea) RETURNS CBlock
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE TYPE CTxIn AS (n INT, prevout_hash BYTEA, prevout_n INT, scriptsig BYTEA, sequence INT);
-CREATE FUNCTION get_vin(bytea) RETURNS SETOF CTxIn
+CREATE TYPE CTx AS (hash BYTEA, version INT, lockTime INT);
+CREATE FUNCTION get_tx(tx bytea) RETURNS CTx
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE TYPE CTxOut AS (n INT, value BIGINT, scriptpubkey BYTEA);
-CREATE FUNCTION get_vout(bytea) RETURNS SETOF CTxOut
+CREATE TYPE CTxIn AS (n INT, prevout_hash BYTEA, prevout_n INT, scriptSig BYTEA, sequence INT);
+CREATE FUNCTION get_vin(tx bytea) RETURNS SETOF CTxIn
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE CTxOut AS (n INT, value BIGINT, scriptPubKey BYTEA);
+CREATE FUNCTION get_vout(tx bytea) RETURNS SETOF CTxOut
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
@@ -22,11 +32,11 @@ CREATE FUNCTION parse_script(bytea) RETURNS SETOF CScriptOp
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION verify_sig(bytea, bytea, int) RETURNS bool
+CREATE FUNCTION verify_sig(txTo bytea, txFrom bytea, int) RETURNS bool
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
 -- experimental
-CREATE FUNCTION get_vout_arr(bytea) RETURNS TxOut[]
+CREATE FUNCTION get_vout_arr(tx bytea) RETURNS TxOut[]
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
