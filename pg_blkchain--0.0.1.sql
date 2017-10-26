@@ -37,6 +37,23 @@ AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
 
 -- experimental
-CREATE FUNCTION get_vout_arr(tx bytea) RETURNS TxOut[]
+CREATE FUNCTION get_vout_arr(tx bytea) RETURNS CTxOut[]
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION get_vin_arr(tx bytea) RETURNS CTxIn[]
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE COutPt AS (hash BYTEA, n INT);
+CREATE FUNCTION get_vin_outpt_arr(tx bytea) RETURNS COutPt[]
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION get_vin_outpt_jsonb(tx bytea) RETURNS JSONB
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION get_vin_outpt_bytea(tx bytea) RETURNS BYTEA[]
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;

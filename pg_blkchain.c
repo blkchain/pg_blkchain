@@ -13,6 +13,14 @@
 #include "utils/array.h"
 #include "utils/lsyscache.h"
 
+/* jsonb */
+#include "utils/jsonb.h"
+#include "utils/bytea.h"
+#include "utils/numeric.h"
+
+/* bytea arr */
+#include "catalog/pg_type.h"
+
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(verify_sig);
@@ -412,80 +420,6 @@ get_block(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(result);
 }
 
-PG_FUNCTION_INFO_V1(get_vout_arr);
-Datum
-get_vout_arr(PG_FUNCTION_ARGS)
-{
-
-    ArrayType     *result;
-    TupleDesc     tupdesc;
-    int16         typlen;
-    bool          typbyval;
-    char          typalign;
-    Datum         *elems;
-    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
-    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
-    int           i;
-    Oid           arroid, tupoid;
-
-    if (get_call_result_type(fcinfo, &arroid, NULL) != TYPEFUNC_SCALAR)
-        ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                 errmsg("function called in context that cannot accept the return type")));
-
-    /* arroid is an array, we need to get the type of the array element */
-    tupoid = get_element_type(arroid);
-    tupdesc = TypeGetTupleDesc(tupoid, NULL);
-    tupdesc = BlessTupleDesc(tupdesc);
-
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
-
-    if (!deser_bp_tx(tx, &cbuf))
-        ereport(ERROR,
-                (errcode(ERRCODE_DATA_EXCEPTION),
-                 errmsg("unable to parse transaction")));
-
-
-    elems = (Datum *) palloc(sizeof(Datum) *  tx->vout->len);
-    for (i = 0; i < tx->vout->len; i++)
-    {
-        struct bp_txout *txout;
-
-		Datum		values[3];
-		bool		nulls[3] = {false};
-        HeapTuple   tuple;
-        bytea       *pk;
-
-        txout = parr_idx(tx->vout, i);
-
-        /* n */
-        values[0] = UInt32GetDatum(i);
-
-        /* value */
-        values[1] = Int64GetDatum(txout->nValue);
-
-        /* scriptpubkey */
-        pk = (bytea *) palloc(txout->scriptPubKey->len + VARHDRSZ);
-        SET_VARSIZE(pk, txout->scriptPubKey->len + VARHDRSZ);
-        memcpy(VARDATA(pk), txout->scriptPubKey->str, txout->scriptPubKey->len);
-        values[2] = PointerGetDatum(pk);
-
-		/* Build CTxOut tuple */
-		tuple = heap_form_tuple(tupdesc, values, nulls);
-		elems[i] = HeapTupleGetDatum(tuple);
-    }
-
-    get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
-    result = construct_array(elems, tx->vout->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
-
-    bp_tx_free(tx);
-    pfree(tx);
-
-    PG_RETURN_ARRAYTYPE_P(result);
-}
-
 PG_FUNCTION_INFO_V1(parse_script);
 Datum
 parse_script(PG_FUNCTION_ARGS)
@@ -587,4 +521,377 @@ parse_script(PG_FUNCTION_ARGS)
 
         SRF_RETURN_DONE(funcctx);
     }
+}
+
+PG_FUNCTION_INFO_V1(get_vout_arr);
+Datum
+get_vout_arr(PG_FUNCTION_ARGS)
+{
+
+    ArrayType     *result;
+    TupleDesc     tupdesc;
+    int16         typlen;
+    bool          typbyval;
+    char          typalign;
+    Datum         *elems;
+    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+    int           i;
+    Oid           arroid, tupoid;
+
+    if (get_call_result_type(fcinfo, &arroid, NULL) != TYPEFUNC_SCALAR)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function called in context that cannot accept the return type")));
+
+    /* arroid is an array, we need to get the type of the array element */
+    tupoid = get_element_type(arroid);
+    tupdesc = TypeGetTupleDesc(tupoid, NULL);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+
+    elems = (Datum *) palloc(sizeof(Datum) *  tx->vout->len);
+    for (i = 0; i < tx->vout->len; i++)
+    {
+        struct bp_txout *txout;
+
+		Datum		values[3];
+		bool		nulls[3] = {false};
+        HeapTuple   tuple;
+        bytea       *pk;
+
+        txout = parr_idx(tx->vout, i);
+
+        /* n */
+        values[0] = UInt32GetDatum(i);
+
+        /* value */
+        values[1] = Int64GetDatum(txout->nValue);
+
+        /* scriptpubkey */
+        pk = (bytea *) palloc(txout->scriptPubKey->len + VARHDRSZ);
+        SET_VARSIZE(pk, txout->scriptPubKey->len + VARHDRSZ);
+        memcpy(VARDATA(pk), txout->scriptPubKey->str, txout->scriptPubKey->len);
+        values[2] = PointerGetDatum(pk);
+
+		/* Build CTxOut tuple */
+		tuple = heap_form_tuple(tupdesc, values, nulls);
+		elems[i] = HeapTupleGetDatum(tuple);
+    }
+
+    get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
+    result = construct_array(elems, tx->vout->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_ARRAYTYPE_P(result);
+}
+
+PG_FUNCTION_INFO_V1(get_vin_arr);
+Datum
+get_vin_arr(PG_FUNCTION_ARGS)
+{
+
+    ArrayType     *result;
+    TupleDesc     tupdesc;
+    int16         typlen;
+    bool          typbyval;
+    char          typalign;
+    Datum         *elems;
+    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+    int           i;
+    Oid           arroid, tupoid;
+
+    if (get_call_result_type(fcinfo, &arroid, NULL) != TYPEFUNC_SCALAR)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function called in context that cannot accept the return type")));
+
+    /* arroid is an array, we need to get the type of the array element */
+    tupoid = get_element_type(arroid);
+    tupdesc = TypeGetTupleDesc(tupoid, NULL);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+
+    elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
+    for (i = 0; i < tx->vin->len; i++)
+    {
+        struct bp_txin *txin;
+
+		Datum		values[5];
+		bool		nulls[5] = {false};
+        HeapTuple   tuple;
+        bytea       *poh;
+        bytea       *sig;
+
+        txin = parr_idx(tx->vin, i);
+
+        /* n */
+        values[0] = UInt32GetDatum(i);
+
+        /* prevout_hash */
+        poh = (bytea *) palloc(sizeof(bu256_t) + VARHDRSZ);
+        SET_VARSIZE(poh, sizeof(bu256_t) + VARHDRSZ);
+        memcpy(VARDATA(poh), &txin->prevout.hash, sizeof(bu256_t));
+        values[1] = PointerGetDatum(poh);
+
+        /* prevout_n */
+        values[2] = UInt32GetDatum(txin->prevout.n);
+
+        /* scriptsig */
+        sig = (bytea *) palloc(txin->scriptSig->len + VARHDRSZ);
+        SET_VARSIZE(sig, txin->scriptSig->len + VARHDRSZ);
+        memcpy(VARDATA(sig), txin->scriptSig->str, txin->scriptSig->len);
+        values[3] = PointerGetDatum(sig);
+
+        /* sequence */
+        values[4] = UInt32GetDatum(txin->nSequence);
+
+		/* Build CTxIn tuple */
+		tuple = heap_form_tuple(tupdesc, values, nulls);
+		elems[i] = HeapTupleGetDatum(tuple);
+    }
+
+    get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
+    result = construct_array(elems, tx->vin->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_ARRAYTYPE_P(result);
+}
+
+PG_FUNCTION_INFO_V1(get_vin_outpt_arr);
+Datum
+get_vin_outpt_arr(PG_FUNCTION_ARGS)
+{
+
+    ArrayType     *result;
+    TupleDesc     tupdesc;
+    int16         typlen;
+    bool          typbyval;
+    char          typalign;
+    Datum         *elems;
+    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+    int           i;
+    Oid           arroid, tupoid;
+
+    if (get_call_result_type(fcinfo, &arroid, NULL) != TYPEFUNC_SCALAR)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function called in context that cannot accept the return type")));
+
+    /* arroid is an array, we need to get the type of the array element */
+    tupoid = get_element_type(arroid);
+    tupdesc = TypeGetTupleDesc(tupoid, NULL);
+    tupdesc = BlessTupleDesc(tupdesc);
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+
+    elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
+    for (i = 0; i < tx->vin->len; i++)
+    {
+        struct bp_txin *txin;
+
+		Datum		values[2];
+		bool		nulls[2] = {false};
+        HeapTuple   tuple;
+        bytea       *poh;
+
+        txin = parr_idx(tx->vin, i);
+
+        /* prevout_hash */
+        poh = (bytea *) palloc(sizeof(bu256_t) + VARHDRSZ);
+        SET_VARSIZE(poh, sizeof(bu256_t) + VARHDRSZ);
+        memcpy(VARDATA(poh), &txin->prevout.hash, sizeof(bu256_t));
+        values[0] = PointerGetDatum(poh);
+
+        /* prevout_n */
+        values[1] = UInt32GetDatum(txin->prevout.n);
+
+		/* Build COutPt tuple */
+		tuple = heap_form_tuple(tupdesc, values, nulls);
+		elems[i] = HeapTupleGetDatum(tuple);
+    }
+
+    get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
+    result = construct_array(elems, tx->vin->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_ARRAYTYPE_P(result);
+}
+
+PG_FUNCTION_INFO_V1(get_vin_outpt_jsonb);
+Datum
+get_vin_outpt_jsonb(PG_FUNCTION_ARGS)
+{
+    typedef struct JsonbInState
+    {
+        JsonbParseState *parseState;
+        JsonbValue *res;
+    } JsonbInState;
+
+    bytea             *b_tx = PG_GETARG_BYTEA_P(0);
+    JsonbInState      result;
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+    int               i;
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+    memset(&result, 0, sizeof(JsonbInState));
+    result.res = pushJsonbValue(&result.parseState, WJB_BEGIN_ARRAY, NULL);
+
+    for (i = 0; i < tx->vin->len; i++)
+    {
+        struct bp_txin *txin;
+
+        bytea       *poh;
+        JsonbValue   jb;
+
+        char *hash_key      = "hash";
+        char *hash_val;
+
+        char *n_key         = "n";
+        char *n_val;
+        int  n_len;
+
+        txin = parr_idx(tx->vin, i);
+
+        result.res = pushJsonbValue(&result.parseState, WJB_BEGIN_OBJECT, NULL);
+
+        /* "hash" */
+        jb.type = jbvString;
+        jb.val.string.len = strlen(hash_key);
+        jb.val.string.val = hash_key;
+        result.res = pushJsonbValue(&result.parseState, WJB_KEY, &jb);
+
+        /* prevout_hash */
+        poh = (bytea *) palloc(sizeof(bu256_t) + VARHDRSZ);
+        SET_VARSIZE(poh, sizeof(bu256_t) + VARHDRSZ);
+        memcpy(VARDATA(poh), &txin->prevout.hash, sizeof(bu256_t));
+
+        hash_val = DatumGetCString(DirectFunctionCall1(byteaout, PointerGetDatum(poh)));
+        jb.type = jbvString;
+        jb.val.string.len = strlen(hash_val);
+        jb.val.string.val = hash_val;
+        result.res = pushJsonbValue(&result.parseState, WJB_VALUE, &jb);
+
+        /* "n" */
+        jb.type = jbvString;
+        jb.val.string.len = strlen(n_key);
+        jb.val.string.val = n_key;
+        result.res = pushJsonbValue(&result.parseState, WJB_KEY, &jb);
+
+        /* prevout_n */
+        n_len = snprintf(NULL, 0, "%d", txin->prevout.n);
+        n_val = palloc(jb.val.string.len + 1);
+        snprintf(n_val, n_len+1, "%d", txin->prevout.n);
+
+        jb.type = jbvNumeric;
+        jb.val.numeric = DatumGetNumeric(DirectFunctionCall3(numeric_in, CStringGetDatum(n_val), 0, -1));
+        pfree(n_val);
+        result.res = pushJsonbValue(&result.parseState, WJB_VALUE, &jb);
+
+        result.res = pushJsonbValue(&result.parseState, WJB_END_OBJECT, NULL);
+    }
+
+    result.res = pushJsonbValue(&result.parseState, WJB_END_ARRAY, NULL);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_POINTER(JsonbValueToJsonb(result.res));
+}
+
+PG_FUNCTION_INFO_V1(get_vin_outpt_bytea);
+Datum
+get_vin_outpt_bytea(PG_FUNCTION_ARGS)
+{
+
+    ArrayType     *result;
+    //TupleDesc     tupdesc;
+    int16         typlen;
+    bool          typbyval;
+    char          typalign;
+    Datum         *elems;
+    bytea         *b_tx = PG_GETARG_BYTEA_P(0);
+    struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
+    struct bp_tx  *tx;
+    int           i;
+
+    if (get_call_result_type(fcinfo, NULL, NULL) != TYPEFUNC_SCALAR)
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 errmsg("function called in context that cannot accept the return type")));
+
+    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
+    bp_tx_init(tx);
+
+    if (!deser_bp_tx(tx, &cbuf))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("unable to parse transaction")));
+
+    elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
+    for (i = 0; i < tx->vin->len; i++)
+    {
+        struct bp_txin *txin;
+        bytea          *poh;
+        uint32_t       nle;
+
+        txin = parr_idx(tx->vin, i);
+        nle = htobe32(txin->prevout.n);
+
+        poh = (bytea *) palloc(sizeof(bu256_t) + sizeof(uint32_t) + VARHDRSZ);
+        SET_VARSIZE(poh, sizeof(bu256_t) + sizeof(uint32_t) + VARHDRSZ);
+        memcpy(VARDATA(poh), &txin->prevout.hash, sizeof(bu256_t));
+        memcpy(VARDATA(poh)+sizeof(bu256_t), &nle, sizeof(uint32_t));
+        elems[i] = PointerGetDatum(poh);
+    }
+
+    get_typlenbyvalalign(BYTEAOID, &typlen, &typbyval, &typalign);
+    result = construct_array(elems, tx->vin->len, BYTEAOID, typlen, typbyval, typalign);
+
+    bp_tx_free(tx);
+    pfree(tx);
+
+    PG_RETURN_ARRAYTYPE_P(result);
 }
