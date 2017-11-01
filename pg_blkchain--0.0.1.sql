@@ -57,3 +57,35 @@ LANGUAGE C IMMUTABLE STRICT;
 CREATE FUNCTION get_vin_outpt_bytea(tx bytea) RETURNS BYTEA[]
 AS '$libdir/pg_blkchain'
 LANGUAGE C IMMUTABLE STRICT;
+
+-- build_vin
+
+CREATE FUNCTION build_vin_transfn(internal, prevout_hash BYTEA, prevout_n INT, scriptsig BYTEA, seq INT) RETURNS internal
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE PARALLEL SAFE;
+
+CREATE FUNCTION build_vin_finalfn(internal) RETURNS BYTEA
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+CREATE AGGREGATE build_vin(prevout_hash BYTEA, prevout_n INT, scriptsig BYTEA, seq INT) (
+  sfunc = build_vin_transfn,
+  stype = internal,
+  finalfunc = build_vin_finalfn
+);
+
+-- build_vout
+
+CREATE FUNCTION build_vout_transfn(internal, value BIGINT, scriptpubkey BYTEA) RETURNS internal
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE PARALLEL SAFE;
+
+CREATE FUNCTION build_vout_finalfn(internal) RETURNS BYTEA
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT PARALLEL SAFE;
+
+CREATE AGGREGATE build_vout(value BIGINT, scriptpubkey BYTEA) (
+  sfunc = build_vout_transfn,
+  stype = internal,
+  finalfunc = build_vout_finalfn
+);

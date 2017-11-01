@@ -4,6 +4,7 @@
 
 #include "ccoin/script.h"
 #include "ccoin/core.h"
+#include "ccoin/serialize.h"
 
 /* For SRF */
 #include "access/htup_details.h"
@@ -64,7 +65,7 @@ verify_sig(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("bp_utxo_from_tx() failed")));
 
-    result = bp_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); // ZZZ SIGHASH_ALL?
+    result = bp_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); // TODO SIGHASH_ALL?
 
     bp_tx_free(&txfrom);
     bp_tx_free(&txto);
@@ -894,4 +895,236 @@ get_vin_outpt_bytea(PG_FUNCTION_ARGS)
     pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
+}
+
+// vin aggregation
+
+typedef struct BuildVinState
+{
+    parr *vin;
+} BuildVinState;
+
+PG_FUNCTION_INFO_V1(build_vin_transfn);
+Datum
+build_vin_transfn(PG_FUNCTION_ARGS)
+{
+
+    MemoryContext aggContext;
+    MemoryContext oldcontext;
+
+    /* we must check for nulls, this function is not STRICT */
+    BuildVinState *state = PG_ARGISNULL(0) ? NULL : (BuildVinState *) PG_GETARG_POINTER(0);
+
+    bytea *hash  = PG_ARGISNULL(1) ? NULL : PG_GETARG_BYTEA_P(1);
+    int32 n      = PG_GETARG_INT32(2);
+    bytea *sig   = PG_ARGISNULL(3) ? NULL : PG_GETARG_BYTEA_P(3);
+    int32 seq    = PG_GETARG_INT32(4);
+
+    struct bp_txin *txin;
+    size_t          sig_sz;
+
+    if (hash && (VARSIZE(hash) - VARHDRSZ) != sizeof(bu256_t))
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("incorrect hash size: %d", VARSIZE(hash))));
+
+    if (!AggCheckCallContext(fcinfo, &aggContext))
+    {
+        elog(ERROR, "function called in non-aggregate context");
+    }
+
+    oldcontext = MemoryContextSwitchTo(aggContext);
+
+    if (state == NULL)
+    {
+        size_t new_sz = 8;
+
+        state = (BuildVinState *) palloc(sizeof(struct BuildVinState));
+        /* avoid using parr_new */
+        state->vin = palloc0(sizeof(parr));
+        state->vin->data = palloc0(new_sz*sizeof(void*));
+        state->vin->alloc = new_sz;
+    }
+
+    txin = palloc(sizeof(*txin));
+    bp_txin_init(txin);
+
+    /* prevout_hash */
+    if (hash == NULL)
+    {
+        /* allow NULL to act as coinbase */
+        const char zhash[sizeof(bu256_t)] = {0};
+        memcpy(&txin->prevout.hash, zhash, sizeof(bu256_t));
+    }
+    else
+        memcpy(&txin->prevout.hash, VARDATA(hash), sizeof(bu256_t));
+
+    /* prevout_n */
+    txin->prevout.n = n;
+
+    /* scriptsig */
+    if (sig != NULL)
+    {
+        sig_sz = VARSIZE(sig) - VARHDRSZ;
+        txin->scriptSig = palloc0(sizeof(cstring));
+        txin->scriptSig->str = palloc(sig_sz);
+        txin->scriptSig->alloc = sig_sz;
+        txin->scriptSig->len = sig_sz;
+        memcpy(txin->scriptSig->str, VARDATA(sig), sig_sz);
+    }
+
+    /* sequence */
+    txin->nSequence = seq;
+
+    /* append to array, but with palloc */
+    if (state->vin->len == state->vin->alloc)
+    {
+        size_t new_sz = state->vin->alloc + 64;
+        state->vin->data = repalloc(&state->vin->data, new_sz*sizeof(void*));
+        state->vin->alloc = new_sz;
+    }
+    parr_add(state->vin, txin);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    PG_RETURN_POINTER(state);
+}
+
+PG_FUNCTION_INFO_V1(build_vin_finalfn);
+Datum
+build_vin_finalfn(PG_FUNCTION_ARGS)
+{
+    BuildVinState *state = (BuildVinState *)PG_GETARG_POINTER(0);
+
+    bytea        *result;
+    cstring      *cstr;
+    unsigned int i;
+
+    Assert(AggCheckCallContext(fcinfo, NULL));
+
+    cstr = cstr_new_sz(512);
+    ser_varlen(cstr, state->vin ? state->vin->len : 0);
+
+    if (state->vin) {
+        for (i = 0; i < state->vin->len; i++) {
+            struct bp_txin *txin;
+
+            txin = parr_idx(state->vin, i);
+            ser_bp_txin(cstr, txin);
+        }
+    }
+
+    result = (bytea *) palloc(cstr->len + VARHDRSZ);
+    SET_VARSIZE(result, cstr->len + VARHDRSZ);
+    memcpy(VARDATA(result), cstr->str, cstr->len);
+
+    cstr_free(cstr, true);
+
+    PG_RETURN_BYTEA_P(result);
+}
+
+// vout aggregation
+
+typedef struct BuildVoutState
+{
+    parr *vout;
+} BuildVoutState;
+
+PG_FUNCTION_INFO_V1(build_vout_transfn);
+Datum
+build_vout_transfn(PG_FUNCTION_ARGS)
+{
+
+    MemoryContext aggContext;
+    MemoryContext oldcontext;
+
+    /* we must check for nulls, this function is not STRICT */
+    BuildVoutState *state = PG_ARGISNULL(0) ? NULL : (BuildVoutState *) PG_GETARG_POINTER(0);
+
+    uint64_t value = PG_GETARG_INT64(1);
+    bytea *pk      = PG_ARGISNULL(2) ? NULL : PG_GETARG_BYTEA_P(2);
+
+    struct bp_txout *txout;
+    size_t          pk_sz;
+
+    if (!AggCheckCallContext(fcinfo, &aggContext))
+    {
+        elog(ERROR, "function called in non-aggregate context");
+    }
+
+    oldcontext = MemoryContextSwitchTo(aggContext);
+
+    if (state == NULL)
+    {
+        size_t new_sz = 8;
+
+        state = (BuildVoutState *) palloc(sizeof(struct BuildVoutState));
+        /* avoid using parr_new */
+        state->vout = palloc0(sizeof(parr));
+        state->vout->data = palloc0(new_sz*sizeof(void*));
+        state->vout->alloc = new_sz;
+    }
+
+    txout = palloc(sizeof(*txout));
+    bp_txout_init(txout);
+
+    /* value */
+    txout->nValue = value;
+
+    /* scriptpubkey */
+    if (pk != NULL)
+    {
+        pk_sz = VARSIZE(pk) - VARHDRSZ;
+        txout->scriptPubKey = palloc0(sizeof(cstring));
+        txout->scriptPubKey->str = palloc(pk_sz);
+        txout->scriptPubKey->alloc = pk_sz;
+        txout->scriptPubKey->len = pk_sz;
+        memcpy(txout->scriptPubKey->str, VARDATA(pk), pk_sz);
+    }
+
+    /* append to array, but with palloc */
+    if (state->vout->len == state->vout->alloc)
+    {
+        size_t new_sz = state->vout->alloc + 64;
+        state->vout->data = repalloc(&state->vout->data, new_sz*sizeof(void*));
+        state->vout->alloc = new_sz;
+    }
+    parr_add(state->vout, txout);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    PG_RETURN_POINTER(state);
+}
+
+PG_FUNCTION_INFO_V1(build_vout_finalfn);
+Datum
+build_vout_finalfn(PG_FUNCTION_ARGS)
+{
+    BuildVoutState *state = (BuildVoutState *)PG_GETARG_POINTER(0);
+
+    bytea        *result;
+    cstring      *cstr;
+    unsigned int i;
+
+    Assert(AggCheckCallContext(fcinfo, NULL));
+
+    cstr = cstr_new_sz(512);
+    ser_varlen(cstr, state->vout ? state->vout->len : 0);
+
+    if (state->vout) {
+        for (i = 0; i < state->vout->len; i++) {
+            struct bp_txout *txout;
+
+            txout = parr_idx(state->vout, i);
+            ser_bp_txout(cstr, txout);
+        }
+    }
+
+    result = (bytea *) palloc(cstr->len + VARHDRSZ);
+    SET_VARSIZE(result, cstr->len + VARHDRSZ);
+    memcpy(VARDATA(result), cstr->str, cstr->len);
+
+    cstr_free(cstr, true);
+
+    PG_RETURN_BYTEA_P(result);
 }
