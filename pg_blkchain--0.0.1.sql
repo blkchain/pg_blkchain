@@ -89,3 +89,9 @@ CREATE AGGREGATE build_vout(value BIGINT, scriptpubkey BYTEA) (
   stype = internal,
   finalfunc = build_vout_finalfn
 );
+
+-- int4send_le
+
+CREATE FUNCTION int4send_le(INT) RETURNS BYTEA
+AS '$libdir/pg_blkchain'
+LANGUAGE C IMMUTABLE STRICT;

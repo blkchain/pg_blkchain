@@ -1128,3 +1128,18 @@ build_vout_finalfn(PG_FUNCTION_ARGS)
 
     PG_RETURN_BYTEA_P(result);
 }
+
+/* int4send_le */
+
+PG_FUNCTION_INFO_V1(int4send_le);
+Datum
+int4send_le(PG_FUNCTION_ARGS)
+{
+    int32 i = htole32(PG_GETARG_INT32(0));
+    bytea *result;
+
+    result = (bytea *) palloc(sizeof(int32) + VARHDRSZ);
+    SET_VARSIZE(result, sizeof(int32) + VARHDRSZ);
+    memcpy(VARDATA(result), &i, sizeof(int32));
+    PG_RETURN_BYTEA_P(result);
+}
