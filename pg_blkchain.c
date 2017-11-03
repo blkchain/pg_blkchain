@@ -2,9 +2,9 @@
 #include "fmgr.h"
 #include "utils/builtins.h"
 
-#include "ccoin/script.h"
-#include "ccoin/core.h"
-#include "ccoin/serialize.h"
+#include "bitc/script.h"
+#include "bitc/core.h"
+#include "bitc/serialize.h"
 
 /* For SRF */
 #include "access/htup_details.h"
@@ -37,39 +37,39 @@ verify_sig(PG_FUNCTION_ARGS)
 
     bool result;
 
-    struct bp_tx txfrom;
-    struct bp_tx txto;
-    struct bp_utxo coin;
+    struct bitc_tx txfrom;
+    struct bitc_tx txto;
+    struct bitc_utxo coin;
 
-    bp_tx_init(&txfrom);
-    if (!deser_bp_tx(&txfrom, &txfrombuf))
+    bitc_tx_init(&txfrom);
+    if (!deser_bitc_tx(&txfrom, &txfrombuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse txFrom transaction")));
-    /* bp_tx_calc_sha256(&txfrom); */
+    /* bitc_tx_calc_sha256(&txfrom); */
     txfrom.sha256_valid = true; /* shortcut - why wouldn't it be? */
 
-    bp_tx_init(&txto);
-    if (!deser_bp_tx(&txto, &txtobuf))
+    bitc_tx_init(&txto);
+    if (!deser_bitc_tx(&txto, &txtobuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse txTo transaction")));
 
     memset(&coin, 0, sizeof(coin));
-    bp_utxo_init(&coin);
+    bitc_utxo_init(&coin);
 
-    if (!bp_utxo_from_tx(&coin, &txfrom,
+    if (!bitc_utxo_from_tx(&coin, &txfrom,
                          false, /* is_coinbase */
                          0))    /* height - doesn't matter */
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
-                 errmsg("bp_utxo_from_tx() failed")));
+                 errmsg("bitc_utxo_from_tx() failed")));
 
-    result = bp_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); // TODO SIGHASH_ALL?
+    result = bitc_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); // TODO SIGHASH_ALL?
 
-    bp_tx_free(&txfrom);
-    bp_tx_free(&txto);
-    bp_utxo_free(&coin);
+    bitc_tx_free(&txfrom);
+    bitc_tx_free(&txto);
+    bitc_utxo_free(&coin);
 
     PG_RETURN_BOOL(result);
 }
@@ -81,7 +81,7 @@ get_vin(PG_FUNCTION_ARGS)
     typedef struct
     {
         TupleDesc	 tupdesc;
-        struct bp_tx *tx;
+        struct bitc_tx *tx;
     } tcontext;
 
     FuncCallContext   *funcctx;
@@ -95,7 +95,7 @@ get_vin(PG_FUNCTION_ARGS)
         MemoryContext oldcontext;
         bytea         *b_tx = PG_GETARG_BYTEA_P(0);
         struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-        struct bp_tx  *tx;
+        struct bitc_tx  *tx;
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -108,10 +108,10 @@ get_vin(PG_FUNCTION_ARGS)
 		ctx = (tcontext *) palloc(sizeof(tcontext));
 		ctx->tupdesc = BlessTupleDesc(tupdesc);
 
-        tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-        bp_tx_init(tx);
+        tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+        bitc_tx_init(tx);
 
-        if (!deser_bp_tx(tx, &cbuf))
+        if (!deser_bitc_tx(tx, &cbuf))
             ereport(ERROR,
                     (errcode(ERRCODE_DATA_EXCEPTION),
                      errmsg("unable to parse transaction")));
@@ -125,7 +125,7 @@ get_vin(PG_FUNCTION_ARGS)
         else
         {
 			/* fast track when no results */
-            bp_tx_free(tx);
+            bitc_tx_free(tx);
             pfree(tx);
             pfree(ctx);
             MemoryContextSwitchTo(oldcontext);
@@ -143,8 +143,8 @@ get_vin(PG_FUNCTION_ARGS)
     if (call_cntr < max_calls)
     {
 
-        struct bp_tx *tx = ctx->tx;
-        struct bp_txin *txin;
+        struct bitc_tx *tx = ctx->tx;
+        struct bitc_txin *txin;
 
 		Datum		values[5];
 		bool		nulls[5] = {false}; /* init all values to false */
@@ -186,7 +186,7 @@ get_vin(PG_FUNCTION_ARGS)
     else
     {
         /* clean up */
-        bp_tx_free(ctx->tx);
+        bitc_tx_free(ctx->tx);
         pfree(ctx->tx);
         pfree(ctx);
 
@@ -202,7 +202,7 @@ get_vout(PG_FUNCTION_ARGS)
     typedef struct
     {
         TupleDesc	 tupdesc;
-        struct bp_tx *tx;
+        struct bitc_tx *tx;
     } tcontext;
 
     FuncCallContext   *funcctx;
@@ -216,7 +216,7 @@ get_vout(PG_FUNCTION_ARGS)
         MemoryContext oldcontext;
         bytea         *b_tx = PG_GETARG_BYTEA_P(0);
         struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-        struct bp_tx  *tx;
+        struct bitc_tx  *tx;
 
         funcctx = SRF_FIRSTCALL_INIT();
         oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
@@ -229,10 +229,10 @@ get_vout(PG_FUNCTION_ARGS)
 		ctx = (tcontext *) palloc(sizeof(tcontext));
 		ctx->tupdesc = BlessTupleDesc(tupdesc);
 
-        tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-        bp_tx_init(tx);
+        tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+        bitc_tx_init(tx);
 
-        if (!deser_bp_tx(tx, &cbuf))
+        if (!deser_bitc_tx(tx, &cbuf))
             ereport(ERROR,
                     (errcode(ERRCODE_DATA_EXCEPTION),
                      errmsg("unable to parse transaction")));
@@ -246,7 +246,7 @@ get_vout(PG_FUNCTION_ARGS)
         else
         {
 			/* fast track when no results */
-            bp_tx_free(tx);
+            bitc_tx_free(tx);
             pfree(tx);
             pfree(ctx);
             MemoryContextSwitchTo(oldcontext);
@@ -264,8 +264,8 @@ get_vout(PG_FUNCTION_ARGS)
     if (call_cntr < max_calls)
     {
 
-        struct bp_tx *tx = ctx->tx;
-        struct bp_txout *txout;
+        struct bitc_tx *tx = ctx->tx;
+        struct bitc_txout *txout;
 
 		Datum		values[3];
 		bool		nulls[3] = {false};
@@ -296,7 +296,7 @@ get_vout(PG_FUNCTION_ARGS)
     else
     {
         /* clean up */
-        bp_tx_free(ctx->tx);
+        bitc_tx_free(ctx->tx);
         pfree(ctx->tx);
         pfree(ctx);
 
@@ -311,7 +311,7 @@ get_tx(PG_FUNCTION_ARGS)
 
     bytea         *b_tx = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
 
     Datum		values[3];
     bool		nulls[3] = {false};
@@ -326,15 +326,15 @@ get_tx(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("function called in context that cannot accept the return type")));
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
 
-    bp_tx_calc_sha256(tx);
+    bitc_tx_calc_sha256(tx);
 
     /* hash */
     hash = (bytea *) palloc(32 + VARHDRSZ);
@@ -351,7 +351,7 @@ get_tx(PG_FUNCTION_ARGS)
     tuple = heap_form_tuple(tupdesc, values, nulls);
     result = HeapTupleGetDatum(tuple);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_DATUM(result);
@@ -364,7 +364,7 @@ get_block(PG_FUNCTION_ARGS)
 
     bytea         *b_blk = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_blk), VARSIZE(b_blk)-VARHDRSZ };
-    struct bp_block  *blk;
+    struct bitc_block  *blk;
 
     Datum		values[6];
     bool		nulls[6] = {false};
@@ -380,10 +380,10 @@ get_block(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("function called in context that cannot accept the return type")));
 
-    blk = (struct bp_block *)palloc(sizeof(struct bp_block));
-    bp_block_init(blk);
+    blk = (struct bitc_block *)palloc(sizeof(struct bitc_block));
+    bitc_block_init(blk);
 
-    if (!deser_bp_block(blk, &cbuf))
+    if (!deser_bitc_block(blk, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse block header")));
@@ -415,7 +415,7 @@ get_block(PG_FUNCTION_ARGS)
     tuple = heap_form_tuple(tupdesc, values, nulls);
     result = HeapTupleGetDatum(tuple);
 
-    bp_block_free(blk);
+    bitc_block_free(blk);
     pfree(blk);
 
     PG_RETURN_DATUM(result);
@@ -537,7 +537,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
     Datum         *elems;
     bytea         *b_tx = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
     int           i;
     Oid           arroid, tupoid;
 
@@ -551,10 +551,10 @@ get_vout_arr(PG_FUNCTION_ARGS)
     tupdesc = TypeGetTupleDesc(tupoid, NULL);
     tupdesc = BlessTupleDesc(tupdesc);
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
@@ -563,7 +563,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
     elems = (Datum *) palloc(sizeof(Datum) *  tx->vout->len);
     for (i = 0; i < tx->vout->len; i++)
     {
-        struct bp_txout *txout;
+        struct bitc_txout *txout;
 
 		Datum		values[3];
 		bool		nulls[3] = {false};
@@ -592,7 +592,7 @@ get_vout_arr(PG_FUNCTION_ARGS)
     get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
     result = construct_array(elems, tx->vout->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
@@ -611,7 +611,7 @@ get_vin_arr(PG_FUNCTION_ARGS)
     Datum         *elems;
     bytea         *b_tx = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
     int           i;
     Oid           arroid, tupoid;
 
@@ -625,10 +625,10 @@ get_vin_arr(PG_FUNCTION_ARGS)
     tupdesc = TypeGetTupleDesc(tupoid, NULL);
     tupdesc = BlessTupleDesc(tupdesc);
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
@@ -637,7 +637,7 @@ get_vin_arr(PG_FUNCTION_ARGS)
     elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
     for (i = 0; i < tx->vin->len; i++)
     {
-        struct bp_txin *txin;
+        struct bitc_txin *txin;
 
 		Datum		values[5];
 		bool		nulls[5] = {false};
@@ -676,7 +676,7 @@ get_vin_arr(PG_FUNCTION_ARGS)
     get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
     result = construct_array(elems, tx->vin->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
@@ -695,7 +695,7 @@ get_vin_outpt_arr(PG_FUNCTION_ARGS)
     Datum         *elems;
     bytea         *b_tx = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
     int           i;
     Oid           arroid, tupoid;
 
@@ -709,10 +709,10 @@ get_vin_outpt_arr(PG_FUNCTION_ARGS)
     tupdesc = TypeGetTupleDesc(tupoid, NULL);
     tupdesc = BlessTupleDesc(tupdesc);
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
@@ -721,7 +721,7 @@ get_vin_outpt_arr(PG_FUNCTION_ARGS)
     elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
     for (i = 0; i < tx->vin->len; i++)
     {
-        struct bp_txin *txin;
+        struct bitc_txin *txin;
 
 		Datum		values[2];
 		bool		nulls[2] = {false};
@@ -747,7 +747,7 @@ get_vin_outpt_arr(PG_FUNCTION_ARGS)
     get_typlenbyvalalign(tupdesc->tdtypeid, &typlen, &typbyval, &typalign);
     result = construct_array(elems, tx->vin->len, tupdesc->tdtypeid, typlen, typbyval, typalign);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
@@ -766,13 +766,13 @@ get_vin_outpt_jsonb(PG_FUNCTION_ARGS)
     bytea             *b_tx = PG_GETARG_BYTEA_P(0);
     JsonbInState      result;
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
     int               i;
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
@@ -782,7 +782,7 @@ get_vin_outpt_jsonb(PG_FUNCTION_ARGS)
 
     for (i = 0; i < tx->vin->len; i++)
     {
-        struct bp_txin *txin;
+        struct bitc_txin *txin;
 
         bytea       *poh;
         JsonbValue   jb;
@@ -836,7 +836,7 @@ get_vin_outpt_jsonb(PG_FUNCTION_ARGS)
 
     result.res = pushJsonbValue(&result.parseState, WJB_END_ARRAY, NULL);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_POINTER(JsonbValueToJsonb(result.res));
@@ -855,7 +855,7 @@ get_vin_outpt_bytea(PG_FUNCTION_ARGS)
     Datum         *elems;
     bytea         *b_tx = PG_GETARG_BYTEA_P(0);
     struct const_buffer cbuf = { VARDATA(b_tx), VARSIZE(b_tx)-VARHDRSZ };
-    struct bp_tx  *tx;
+    struct bitc_tx  *tx;
     int           i;
 
     if (get_call_result_type(fcinfo, NULL, NULL) != TYPEFUNC_SCALAR)
@@ -863,10 +863,10 @@ get_vin_outpt_bytea(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                  errmsg("function called in context that cannot accept the return type")));
 
-    tx = (struct bp_tx *)palloc(sizeof(struct bp_tx));
-    bp_tx_init(tx);
+    tx = (struct bitc_tx *)palloc(sizeof(struct bitc_tx));
+    bitc_tx_init(tx);
 
-    if (!deser_bp_tx(tx, &cbuf))
+    if (!deser_bitc_tx(tx, &cbuf))
         ereport(ERROR,
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse transaction")));
@@ -874,7 +874,7 @@ get_vin_outpt_bytea(PG_FUNCTION_ARGS)
     elems = (Datum *) palloc(sizeof(Datum) *  tx->vin->len);
     for (i = 0; i < tx->vin->len; i++)
     {
-        struct bp_txin *txin;
+        struct bitc_txin *txin;
         bytea          *poh;
         uint32_t       nle;
 
@@ -891,7 +891,7 @@ get_vin_outpt_bytea(PG_FUNCTION_ARGS)
     get_typlenbyvalalign(BYTEAOID, &typlen, &typbyval, &typalign);
     result = construct_array(elems, tx->vin->len, BYTEAOID, typlen, typbyval, typalign);
 
-    bp_tx_free(tx);
+    bitc_tx_free(tx);
     pfree(tx);
 
     PG_RETURN_ARRAYTYPE_P(result);
@@ -920,7 +920,7 @@ build_vin_transfn(PG_FUNCTION_ARGS)
     bytea *sig   = PG_ARGISNULL(3) ? NULL : PG_GETARG_BYTEA_P(3);
     int32 seq    = PG_GETARG_INT32(4);
 
-    struct bp_txin *txin;
+    struct bitc_txin *txin;
     size_t          sig_sz;
 
     if (hash && (VARSIZE(hash) - VARHDRSZ) != sizeof(bu256_t))
@@ -947,7 +947,7 @@ build_vin_transfn(PG_FUNCTION_ARGS)
     }
 
     txin = palloc(sizeof(*txin));
-    bp_txin_init(txin);
+    bitc_txin_init(txin);
 
     /* prevout_hash */
     if (hash == NULL)
@@ -1007,10 +1007,10 @@ build_vin_finalfn(PG_FUNCTION_ARGS)
 
     if (state->vin) {
         for (i = 0; i < state->vin->len; i++) {
-            struct bp_txin *txin;
+            struct bitc_txin *txin;
 
             txin = parr_idx(state->vin, i);
-            ser_bp_txin(cstr, txin);
+            ser_bitc_txin(cstr, txin);
         }
     }
 
@@ -1044,7 +1044,7 @@ build_vout_transfn(PG_FUNCTION_ARGS)
     uint64_t value = PG_GETARG_INT64(1);
     bytea *pk      = PG_ARGISNULL(2) ? NULL : PG_GETARG_BYTEA_P(2);
 
-    struct bp_txout *txout;
+    struct bitc_txout *txout;
     size_t          pk_sz;
 
     if (!AggCheckCallContext(fcinfo, &aggContext))
@@ -1066,7 +1066,7 @@ build_vout_transfn(PG_FUNCTION_ARGS)
     }
 
     txout = palloc(sizeof(*txout));
-    bp_txout_init(txout);
+    bitc_txout_init(txout);
 
     /* value */
     txout->nValue = value;
@@ -1113,10 +1113,10 @@ build_vout_finalfn(PG_FUNCTION_ARGS)
 
     if (state->vout) {
         for (i = 0; i < state->vout->len; i++) {
-            struct bp_txout *txout;
+            struct bitc_txout *txout;
 
             txout = parr_idx(state->vout, i);
-            ser_bp_txout(cstr, txout);
+            ser_bitc_txout(cstr, txout);
         }
     }
 

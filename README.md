@@ -97,16 +97,24 @@ If you find this interesting, comment here in an issue or on twitter
 ## Building ##
 
 This extension requires
-[github.com/jgarzik/picocoin](https://github.com/jgarzik/picocoin).
-(No, we do not endorse SegWit2X, this is the only functional C library
-that I could find. If you have a better idea, let me know).
+[github.com/libbitc/libbitc](https://github.com/libbitc/libbitc), which is
+a fork of picocoin with SegWit support and other improvements.
 
-Building picocoin is relatively simple, you will need to first
-`git clone https://github.com/bitcoin-core/secp256k1` into the `external`
-subdirectory and build it. It seems to suggest a particular git hash, but I just
-used the latest and it works.
+Building and installing libbitc is up to the reader, the following
+worked on my Debian system perfectly:
 
-Once you have picocoin installed, you should be able to just
+```sh
+  # build and install .deb packages
+  git clone https://github.com/grisha/libbitc.git
+  cd libbitc
+  git submodule update --init --recursive
+  ./autogen.sh
+  ./configure
+  make pgk-deb
+  sudo dpkg -i ./libbitc*deb
+```
+
+Once you have libbitc installed, you should be able to just
 
 ```
 make

@@ -10,7 +10,8 @@ MODULE_big    = pg_blkchain
 SRCS        = pg_blkchain.c
 OBJS        = $(SRCS:.c=.o)
 
-SHLIB_LINK    += -lccoin
+#SHLIB_LINK    += -lccoin
+SHLIB_LINK    += -lbitc
 
 # postgres build stuff
 PG_CONFIG = pg_config
