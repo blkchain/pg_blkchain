@@ -39,7 +39,9 @@ verify_sig(PG_FUNCTION_ARGS)
 
     struct bitc_tx txfrom;
     struct bitc_tx txto;
-    struct bitc_utxo coin;
+    struct bitc_utxo  coin;
+    struct bitc_txin  *txin;
+    struct bitc_txout *txout;
 
     bitc_tx_init(&txfrom);
     if (!deser_bitc_tx(&txfrom, &txfrombuf))
@@ -55,6 +57,19 @@ verify_sig(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("unable to parse txTo transaction")));
 
+    if (n >= txto.vin->len)
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("invalid n (%d) for the txTo", n)));
+
+    txin = parr_idx(txto.vin, n);
+    if (txin->prevout.n >= txfrom.vout->len)
+        ereport(ERROR,
+                (errcode(ERRCODE_DATA_EXCEPTION),
+                 errmsg("invalid prevout.n (%d) for the txIn", txin->prevout.n)));
+
+    txout = parr_idx(txfrom.vout, txin->prevout.n);
+
     memset(&coin, 0, sizeof(coin));
     bitc_utxo_init(&coin);
 
@@ -65,7 +80,7 @@ verify_sig(PG_FUNCTION_ARGS)
                 (errcode(ERRCODE_DATA_EXCEPTION),
                  errmsg("bitc_utxo_from_tx() failed")));
 
-    result = bitc_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH, SIGHASH_ALL); // TODO SIGHASH_ALL?
+    result = bitc_verify_sig(&coin, &txto, n, SCRIPT_VERIFY_P2SH|SCRIPT_VERIFY_WITNESS, txout->nValue);
 
     bitc_tx_free(&txfrom);
     bitc_tx_free(&txto);
